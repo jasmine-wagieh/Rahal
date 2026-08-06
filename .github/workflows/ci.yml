@@ -1,0 +1,26 @@
+name: Rahal CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  api-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore API dependencies
+        run: dotnet restore RahalApi/RahalApi.csproj
+
+      - name: Build API
+        run: dotnet build RahalApi/RahalApi.csproj --configuration Release --no-restore
