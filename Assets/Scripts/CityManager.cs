@@ -20,10 +20,15 @@ public class CityManager : MonoBehaviour
     {
         database = FirebaseFirestore.DefaultInstance;
 
-        selectedCity = PlayerPrefs.GetString("SelectedCity", "Cairo");
+        selectedCity = PlayerPrefs.GetString(
+            "SelectedCity",
+            "Cairo"
+        );
 
         if (cityTitle != null)
+        {
             cityTitle.text = selectedCity;
+        }
 
         LoadPlaces();
     }
@@ -60,15 +65,28 @@ public class CityManager : MonoBehaviour
 
     private async void LoadPlaces()
     {
-        foreach (Transform child in placesContent)
+        if (placesContent == null)
         {
-            Destroy(child.gameObject);
+            Debug.LogError(
+                "Places Content is not assigned in City Manager."
+            );
+            return;
         }
+
+        if (placeCardPrefab == null)
+        {
+            Debug.LogError(
+                "Place Card Prefab is not assigned in City Manager."
+            );
+            return;
+        }
+
+        ClearCards();
 
         if (emptyMessage != null)
         {
             emptyMessage.gameObject.SetActive(true);
-            emptyMessage.text = "Loading...";
+            emptyMessage.text = "Loading places...";
         }
 
         try
@@ -79,56 +97,95 @@ public class CityManager : MonoBehaviour
 
             if (selectedCategory != "All")
             {
-                query = query.WhereEqualTo("category", selectedCategory);
+                query = query.WhereEqualTo(
+                    "category",
+                    selectedCategory
+                );
             }
 
-            QuerySnapshot snapshot = await query.GetSnapshotAsync();
+            QuerySnapshot snapshot =
+                await query.GetSnapshotAsync();
 
             if (snapshot.Count == 0)
             {
                 if (emptyMessage != null)
-                    emptyMessage.text = "No places found.";
+                {
+                    emptyMessage.gameObject.SetActive(true);
+                    emptyMessage.text =
+                        "No places found in " +
+                        selectedCity +
+                        ".";
+                }
 
                 return;
             }
 
             if (emptyMessage != null)
-                emptyMessage.gameObject.SetActive(false);
-
-            foreach (DocumentSnapshot doc in snapshot.Documents)
             {
-                GameObject card = Instantiate(placeCardPrefab, placesContent);
+                emptyMessage.gameObject.SetActive(false);
+            }
 
-                PlaceCard placeCard = card.GetComponent<PlaceCard>();
+            foreach (
+                DocumentSnapshot document
+                in snapshot.Documents
+            )
+            {
+                GameObject cardObject = Instantiate(
+                    placeCardPrefab,
+                    placesContent
+                );
 
-                if (placeCard != null)
+                PlaceCard placeCard =
+                    cardObject.GetComponent<PlaceCard>();
+
+                if (placeCard == null)
                 {
-                    placeCard.Setup(
-                        GetValue(doc, "name"),
-                        GetValue(doc, "category"),
-                        GetValue(doc, "description"),
-                        GetValue(doc, "imageUrl"),
-                        selectedCity
+                    Debug.LogError(
+                        "PlaceCard script is missing from the prefab."
                     );
+                    continue;
                 }
+
+                placeCard.Setup(
+                    document.Id,
+                    GetString(document, "name"),
+                    GetString(document, "category"),
+                    GetString(document, "description"),
+                    GetString(document, "imageUrl"),
+                    selectedCity
+                );
             }
         }
-        catch (Exception e)
+        catch (Exception exception)
         {
-            Debug.LogError(e);
+            Debug.LogException(exception);
 
             if (emptyMessage != null)
             {
                 emptyMessage.gameObject.SetActive(true);
-                emptyMessage.text = "Error loading places.";
+                emptyMessage.text =
+                    "Could not load places.";
             }
         }
     }
 
-    private string GetValue(DocumentSnapshot doc, string field)
+    private void ClearCards()
     {
-        if (doc.ContainsField(field))
-            return doc.GetValue<string>(field);
+        foreach (Transform child in placesContent)
+        {
+            Destroy(child.gameObject);
+        }
+    }
+
+    private string GetString(
+        DocumentSnapshot document,
+        string fieldName
+    )
+    {
+        if (document.ContainsField(fieldName))
+        {
+            return document.GetValue<string>(fieldName);
+        }
 
         return "";
     }

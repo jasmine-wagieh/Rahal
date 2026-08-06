@@ -52,4 +52,9 @@ public class HomeManager : MonoBehaviour
         auth.SignOut();
         SceneManager.LoadScene("Login");
     }
+
+    public void OpenProfile()
+    {
+        SceneManager.LoadScene("Profile");
+        }
 }

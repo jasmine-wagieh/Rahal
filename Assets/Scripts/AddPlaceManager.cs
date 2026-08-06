@@ -1,10 +1,13 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using Firebase.Auth;
 using Firebase.Firestore;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Networking;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 public class AddPlaceManager : MonoBehaviour
 {
@@ -13,13 +16,20 @@ public class AddPlaceManager : MonoBehaviour
     public TMP_InputField cityInput;
     public TMP_InputField categoryInput;
     public TMP_InputField descriptionInput;
-    public TMP_InputField imageUrlInput;
 
-    [Header("UI")]
+    [Header("Photo UI")]
+    public RawImage photoPreview;
+
+    [Header("Other UI")]
     public TMP_Text statusText;
+
+    private const string CloudName = "p6hzbgbe";
+    private const string UploadPreset = "i9ftxhc1";
 
     private FirebaseFirestore database;
     private FirebaseAuth auth;
+
+    private string selectedImagePath;
     private bool isUploading;
 
     private void Start()
@@ -27,21 +37,79 @@ public class AddPlaceManager : MonoBehaviour
         database = FirebaseFirestore.DefaultInstance;
         auth = FirebaseAuth.DefaultInstance;
 
+        if (photoPreview != null)
+        {
+            photoPreview.gameObject.SetActive(false);
+        }
+
         SetStatus("");
     }
 
-    public async void UploadPlace()
+    public void ChoosePhoto()
+    {
+        NativeGallery.GetImageFromGallery(
+            imagePath =>
+            {
+                if (string.IsNullOrEmpty(imagePath))
+                {
+                    SetStatus("No photo selected.");
+                    return;
+                }
+
+                selectedImagePath = imagePath;
+
+                Texture2D selectedTexture =
+                    NativeGallery.LoadImageAtPath(
+                        imagePath,
+                        1024,
+                        false,
+                        false
+                    );
+
+                if (selectedTexture == null)
+                {
+                    selectedImagePath = "";
+                    SetStatus("Could not load the selected photo.");
+                    return;
+                }
+
+                if (photoPreview != null)
+                {
+                    photoPreview.texture = selectedTexture;
+                    photoPreview.gameObject.SetActive(true);
+                }
+
+                SetStatus("Photo selected.");
+            },
+            "Choose a place photo",
+            "image/*"
+        );
+    }
+
+    public void UploadPlace()
     {
         if (isUploading)
         {
             return;
         }
 
-        string placeName = nameInput.text.Trim();
-        string city = NormaliseCity(cityInput.text);
-        string category = NormaliseCategory(categoryInput.text);
-        string description = descriptionInput.text.Trim();
-        string imageUrl = imageUrlInput.text.Trim();
+        string placeName =
+            nameInput != null ? nameInput.text.Trim() : "";
+
+        string city =
+            cityInput != null
+                ? NormaliseCity(cityInput.text)
+                : "";
+
+        string category =
+            categoryInput != null
+                ? NormaliseCategory(categoryInput.text)
+                : "";
+
+        string description =
+            descriptionInput != null
+                ? descriptionInput.text.Trim()
+                : "";
 
         if (string.IsNullOrEmpty(placeName))
         {
@@ -69,24 +137,132 @@ public class AddPlaceManager : MonoBehaviour
             return;
         }
 
-        if (string.IsNullOrEmpty(imageUrl))
+        if (string.IsNullOrEmpty(selectedImagePath))
         {
-            SetStatus("Enter a direct image URL.");
+            SetStatus("Choose a photo first.");
             return;
+        }
+
+        StartCoroutine(
+            UploadPhotoAndSavePlace(
+                placeName,
+                city,
+                category,
+                description
+            )
+        );
+    }
+
+    private IEnumerator UploadPhotoAndSavePlace(
+        string placeName,
+        string city,
+        string category,
+        string description
+    )
+    {
+        isUploading = true;
+        SetStatus("Uploading photo...");
+
+        byte[] imageBytes;
+
+        try
+        {
+            imageBytes =
+                System.IO.File.ReadAllBytes(selectedImagePath);
+        }
+        catch (Exception exception)
+        {
+            Debug.LogException(exception);
+            SetStatus("Could not read the selected photo.");
+            isUploading = false;
+            yield break;
+        }
+
+        string uploadUrl =
+            "https://api.cloudinary.com/v1_1/" +
+            CloudName +
+            "/image/upload";
+
+        WWWForm form = new WWWForm();
+
+        form.AddField("upload_preset", UploadPreset);
+
+        form.AddBinaryData(
+            "file",
+            imageBytes,
+            "rahal_place.jpg",
+            "image/jpeg"
+        );
+
+        using UnityWebRequest request =
+            UnityWebRequest.Post(uploadUrl, form);
+
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success)
+        {
+            Debug.LogError(
+                "Cloudinary upload failed: " +
+                request.error +
+                "\n" +
+                request.downloadHandler.text
+            );
+
+            SetStatus("Photo upload failed.");
+            isUploading = false;
+            yield break;
+        }
+
+        CloudinaryResponse response;
+
+        try
+        {
+            response = JsonUtility.FromJson<CloudinaryResponse>(
+                request.downloadHandler.text
+            );
+        }
+        catch (Exception exception)
+        {
+            Debug.LogException(exception);
+            SetStatus("Could not read the upload response.");
+            isUploading = false;
+            yield break;
         }
 
         if (
-            !imageUrl.StartsWith("http://") &&
-            !imageUrl.StartsWith("https://")
+            response == null ||
+            string.IsNullOrEmpty(response.secure_url)
         )
         {
-            SetStatus("Enter a valid image URL.");
-            return;
+            Debug.LogError(
+                "Cloudinary response did not contain secure_url:\n" +
+                request.downloadHandler.text
+            );
+
+            SetStatus("Photo upload returned no URL.");
+            isUploading = false;
+            yield break;
         }
 
-        isUploading = true;
-        SetStatus("Uploading place...");
+        SetStatus("Saving place...");
 
+        SavePlaceToFirestore(
+            placeName,
+            city,
+            category,
+            description,
+            response.secure_url
+        );
+    }
+
+    private async void SavePlaceToFirestore(
+        string placeName,
+        string city,
+        string category,
+        string description,
+        string imageUrl
+    )
+    {
         try
         {
             string userId = "unknown";
@@ -105,7 +281,10 @@ public class AddPlaceManager : MonoBehaviour
                     { "description", description },
                     { "imageUrl", imageUrl },
                     { "uploadedBy", userId },
-                    { "createdAt", Timestamp.GetCurrentTimestamp() }
+                    {
+                        "createdAt",
+                        Timestamp.GetCurrentTimestamp()
+                    }
                 };
 
             await database
@@ -114,9 +293,9 @@ public class AddPlaceManager : MonoBehaviour
 
             SetStatus("Place uploaded successfully!");
 
-            ClearInputs();
-
             PlayerPrefs.SetString("SelectedCity", city);
+
+            ClearInputs();
 
             await System.Threading.Tasks.Task.Delay(1000);
 
@@ -125,7 +304,7 @@ public class AddPlaceManager : MonoBehaviour
         catch (Exception exception)
         {
             Debug.LogException(exception);
-            SetStatus("Upload failed. Check the Unity Console.");
+            SetStatus("Place upload failed.");
         }
         finally
         {
@@ -186,11 +365,25 @@ public class AddPlaceManager : MonoBehaviour
 
     private void ClearInputs()
     {
-        nameInput.text = "";
-        cityInput.text = "";
-        categoryInput.text = "";
-        descriptionInput.text = "";
-        imageUrlInput.text = "";
+        if (nameInput != null)
+            nameInput.text = "";
+
+        if (cityInput != null)
+            cityInput.text = "";
+
+        if (categoryInput != null)
+            categoryInput.text = "";
+
+        if (descriptionInput != null)
+            descriptionInput.text = "";
+
+        selectedImagePath = "";
+
+        if (photoPreview != null)
+        {
+            photoPreview.texture = null;
+            photoPreview.gameObject.SetActive(false);
+        }
     }
 
     private void SetStatus(string message)
@@ -204,5 +397,11 @@ public class AddPlaceManager : MonoBehaviour
     public void GoBack()
     {
         SceneManager.LoadScene("Home");
+    }
+
+    [Serializable]
+    private class CloudinaryResponse
+    {
+        public string secure_url;
     }
 }
