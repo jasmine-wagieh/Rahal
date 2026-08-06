@@ -1,19 +1,16 @@
 using System;
-using System.Collections;
-using System.Text;
 using Firebase.Firestore;
 using TMPro;
 using UnityEngine;
-using UnityEngine.Networking;
 using UnityEngine.SceneManagement;
-using UnityEngine.UI;
 
 public class CityManager : MonoBehaviour
 {
     [Header("UI")]
     public TMP_Text cityTitle;
-    public TMP_Text placesText;
-    public RawImage placeImage;
+    public Transform placesContent;
+    public GameObject placeCardPrefab;
+    public TMP_Text emptyMessage;
 
     private FirebaseFirestore database;
     private string selectedCity;
@@ -21,19 +18,13 @@ public class CityManager : MonoBehaviour
 
     private void Start()
     {
+        database = FirebaseFirestore.DefaultInstance;
+
         selectedCity = PlayerPrefs.GetString("SelectedCity", "Cairo");
 
         if (cityTitle != null)
-        {
             cityTitle.text = selectedCity;
-        }
 
-        if (placeImage != null)
-        {
-            placeImage.gameObject.SetActive(false);
-        }
-
-        database = FirebaseFirestore.DefaultInstance;
         LoadPlaces();
     }
 
@@ -69,14 +60,15 @@ public class CityManager : MonoBehaviour
 
     private async void LoadPlaces()
     {
-        if (placesText != null)
+        foreach (Transform child in placesContent)
         {
-            placesText.text = "Loading places...";
+            Destroy(child.gameObject);
         }
 
-        if (placeImage != null)
+        if (emptyMessage != null)
         {
-            placeImage.gameObject.SetActive(false);
+            emptyMessage.gameObject.SetActive(true);
+            emptyMessage.text = "Loading...";
         }
 
         try
@@ -87,125 +79,58 @@ public class CityManager : MonoBehaviour
 
             if (selectedCategory != "All")
             {
-                query = query.WhereEqualTo(
-                    "category",
-                    selectedCategory
-                );
+                query = query.WhereEqualTo("category", selectedCategory);
             }
 
             QuerySnapshot snapshot = await query.GetSnapshotAsync();
 
             if (snapshot.Count == 0)
             {
-                if (placesText != null)
-                {
-                    placesText.text =
-                        "No " +
-                        selectedCategory.ToLower() +
-                        " places found in " +
-                        selectedCity +
-                        ".";
-                }
+                if (emptyMessage != null)
+                    emptyMessage.text = "No places found.";
 
                 return;
             }
 
-            StringBuilder result = new StringBuilder();
-            bool firstImageLoaded = false;
+            if (emptyMessage != null)
+                emptyMessage.gameObject.SetActive(false);
 
-            foreach (DocumentSnapshot document in snapshot.Documents)
+            foreach (DocumentSnapshot doc in snapshot.Documents)
             {
-                string name = GetString(document, "name");
-                string category = GetString(document, "category");
-                string description = GetString(
-                    document,
-                    "description"
-                );
-                string imageUrl = GetString(
-                    document,
-                    "imageUrl"
-                );
+                GameObject card = Instantiate(placeCardPrefab, placesContent);
 
-                result.AppendLine(name);
-                result.AppendLine(category);
-                result.AppendLine(description);
-                result.AppendLine();
-                result.AppendLine("--------------------");
-                result.AppendLine();
+                PlaceCard placeCard = card.GetComponent<PlaceCard>();
 
-                if (
-                    !firstImageLoaded &&
-                    !string.IsNullOrEmpty(imageUrl)
-                )
+                if (placeCard != null)
                 {
-                    firstImageLoaded = true;
-                    StartCoroutine(LoadImage(imageUrl));
+                    placeCard.Setup(
+                        GetValue(doc, "name"),
+                        GetValue(doc, "category"),
+                        GetValue(doc, "description"),
+                        GetValue(doc, "imageUrl"),
+                        selectedCity
+                    );
                 }
             }
-
-            if (placesText != null)
-            {
-                placesText.text = result.ToString();
-            }
         }
-        catch (Exception exception)
+        catch (Exception e)
         {
-            Debug.LogException(exception);
+            Debug.LogError(e);
 
-            if (placesText != null)
+            if (emptyMessage != null)
             {
-                placesText.text =
-                    "Could not load places. Check the Unity Console.";
+                emptyMessage.gameObject.SetActive(true);
+                emptyMessage.text = "Error loading places.";
             }
         }
     }
 
-    private string GetString(
-        DocumentSnapshot document,
-        string fieldName
-    )
+    private string GetValue(DocumentSnapshot doc, string field)
     {
-        if (document.ContainsField(fieldName))
-        {
-            return document.GetValue<string>(fieldName);
-        }
+        if (doc.ContainsField(field))
+            return doc.GetValue<string>(field);
 
         return "";
-    }
-
-    private IEnumerator LoadImage(string imageUrl)
-    {
-        if (placeImage == null)
-        {
-            Debug.LogError(
-                "Place Image is not connected in City Manager."
-            );
-            yield break;
-        }
-
-        using UnityWebRequest request =
-            UnityWebRequestTexture.GetTexture(imageUrl);
-
-        yield return request.SendWebRequest();
-
-        if (request.result != UnityWebRequest.Result.Success)
-        {
-            Debug.LogError(
-                "Image failed to load: " +
-                request.error +
-                "\nURL: " +
-                imageUrl
-            );
-
-            placeImage.gameObject.SetActive(false);
-            yield break;
-        }
-
-        Texture2D texture =
-            DownloadHandlerTexture.GetContent(request);
-
-        placeImage.texture = texture;
-        placeImage.gameObject.SetActive(true);
     }
 
     public void GoBack()
