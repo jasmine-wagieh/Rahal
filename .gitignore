@@ -24,3 +24,10 @@ Assets/AssetStoreTools*
 Thumbs.dbc
 # Firebase desktop binaries generated/imported for Editor testing
 Assets/Firebase/Plugins/x86_64/
+# ASP.NET / .NET generated files
+RahalApi/bin/
+RahalApi/obj/
+
+# SQLite temporary files
+RahalApi/*.db-shm
+RahalApi/*.db-wal
