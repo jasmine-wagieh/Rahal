@@ -1,6 +1,0 @@
-@RahalApi_HostAddress = http://localhost:5208
-
-GET {{RahalApi_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###
