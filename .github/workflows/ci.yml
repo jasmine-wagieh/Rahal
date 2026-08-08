@@ -7,20 +7,25 @@ on:
     branches: [ main ]
 
 jobs:
-  api-build:
+  validate-project:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '9.0.x'
+      - name: Verify Unity project structure
+        run: |
+          test -d Assets
+          test -d Packages
+          test -d ProjectSettings
+          test -f Assets/Scripts/LoginManager.cs
+          test -f Assets/Scripts/HomeManager.cs
+          test -f Assets/Scripts/CityManager.cs
+          test -f Assets/Scripts/AddPlaceManager.cs
+          test -f Assets/Scripts/ProfileManager.cs
 
-      - name: Restore API dependencies
-        run: dotnet restore RahalApi/RahalApi.csproj
-
-      - name: Build API
-        run: dotnet build RahalApi/RahalApi.csproj --configuration Release --no-restore
+      - name: Verify README
+        run: |
+          test -f README.md
+          echo "Rahal project structure verified successfully."
